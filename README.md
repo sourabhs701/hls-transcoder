@@ -17,3 +17,9 @@ Below is the system design diagram for the HLS transcoder system:
 ---
 
 Feel free to explore each directory for more details about individual components.
+
+## Author
+
+Built by [Sourabh Soni](https://srb.codes?utm_source=github&utm_medium=readme&utm_campaign=hls-transcoder) — Full-Stack & Gen AI Engineer.
+
+> No case-study post exists yet. Content calendar target: **"HLS adaptive bitrate streaming with FFmpeg and Node.js"** (keyword: `hls adaptive bitrate streaming nodejs ffmpeg`).

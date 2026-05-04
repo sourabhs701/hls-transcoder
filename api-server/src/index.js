@@ -1,7 +1,7 @@
 import express from "express";
 import Redis from "ioredis";
 import { Server } from "socket.io";
-import { exec } from "child_process";
+import { execFile } from "child_process";
 import dotenv from "dotenv";
 import { generateSlug } from "random-word-slugs";
 import path from "path";
@@ -66,10 +66,25 @@ app.get("/projects", (req, res) => {
   });
 });
 
+function isValidSourceUrl(value) {
+  if (typeof value !== "string" || value.length === 0 || value.length > 2048) {
+    return false;
+  }
+  let parsed;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return false;
+  }
+  return parsed.protocol === "https:" || parsed.protocol === "s3:";
+}
+
 app.post("/transcode", (req, res) => {
   const { s3Url } = req.body;
-  if (!s3Url) {
-    return res.status(400).json({ error: "s3Url is required" });
+  if (!isValidSourceUrl(s3Url)) {
+    return res
+      .status(400)
+      .json({ error: "s3Url must be an https:// or s3:// URL" });
   }
   const projectId = generateSlug();
   const hls_url = `https://${S3_BUCKET}.s3.${AWS_REGION}.amazonaws.com/__outputs/${projectId}/index.m3u8`;
@@ -88,7 +103,7 @@ app.get("*catchall", (req, res) => {
 });
 
 function spinup_docker(s3Url, projectId) {
-  const env = [
+  const envPairs = [
     `S3__URL=${s3Url}`,
     `PROJECT_ID=${projectId}`,
     `REDIS_URL=${REDIS_URL}`,
@@ -96,13 +111,20 @@ function spinup_docker(s3Url, projectId) {
     `S3_BUCKET=${S3_BUCKET}`,
     `AWS_ACCESS_KEY_ID=${process.env.AWS_ACCESS_KEY_ID || ""}`,
     `AWS_SECRET_ACCESS_KEY=${process.env.AWS_SECRET_ACCESS_KEY || ""}`,
-  ]
-    .map((kv) => `-e ${kv}`)
-    .join(" ");
+  ];
   const network = process.env.TRANSCODER_NETWORK
     ? `--network=${process.env.TRANSCODER_NETWORK}`
     : "--network=host";
-  exec(`docker run -d ${network} ${env} ${TRANSCODER_IMAGE}`);
+  const args = ["run", "-d", network];
+  for (const kv of envPairs) {
+    args.push("-e", kv);
+  }
+  args.push(TRANSCODER_IMAGE);
+  execFile("docker", args, (err) => {
+    if (err) {
+      console.error(`docker run failed for ${projectId}:`, err.message);
+    }
+  });
   io.emit("message", `transcode ${s3Url} ${projectId}`);
 }
 

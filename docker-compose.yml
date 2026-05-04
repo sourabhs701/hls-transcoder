@@ -1,26 +1,58 @@
 networks:
   hls:
+    name: hls-transcoder_hls
     driver: bridge
 
 services:
+  redis:
+    image: redis:7-alpine
+    container_name: hls-redis
+    ports:
+      - "6379:6379"
+    networks:
+      - hls
+
+  # Builds the per-job transcoder image so api-server can `docker run` it
+  # on demand. This service exits immediately — it exists only to make
+  # `docker-compose build` produce the `transcoder` image tag.
+  transcoder:
+    image: transcoder
+    build:
+      context: ./transcoder
+    profiles: ["build-only"]
+
   api-server:
     build:
       context: ./api-server
-    container_name: api-server
+    container_name: hls-api-server
     depends_on:
       - redis
     env_file:
-      - ./api-server/.env
+      - path: ./api-server/.env
+        required: false
+    environment:
+      REDIS_URL: redis://redis:6379
+      TRANSCODER_NETWORK: hls-transcoder_hls
+    # The api-server spawns the transcoder image per job via `docker run`.
+    # Mounting the host docker socket lets the container talk to the host
+    # docker daemon. Trade-off: anything that can talk to this socket has
+    # root-equivalent access to the host. Run only on machines you own.
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
     networks:
       - hls
     ports:
-      - "9001:9001"
       - "9000:9000"
+      - "9001:9001"
 
-  redis:
-    image: redis:7-alpine
-    container_name: redis
+  frontend:
+    image: node:20-alpine
+    container_name: hls-frontend
+    working_dir: /app
+    command: sh -c "npm install --no-audit --no-fund && npm run dev -- --host 0.0.0.0"
+    volumes:
+      - ./frontend:/app
     ports:
-      - "6379:6379"
+      - "5173:5173"
     networks:
       - hls

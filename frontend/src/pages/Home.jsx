@@ -2,7 +2,19 @@ import { useState, useEffect, useRef } from "react";
 import { io } from "socket.io-client";
 import VideoPlayer from "../components/VideoPlayer";
 
-const socket = io("http://localhost:9001");
+const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || "http://localhost:9001";
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:9000";
+
+const socket = io(SOCKET_URL);
+
+function parseLog(msg) {
+    try {
+        const obj = JSON.parse(msg);
+        return typeof obj.log === "string" ? obj.log : msg;
+    } catch {
+        return msg;
+    }
+}
 
 const Home = () => {
     const [s3Url, setS3Url] = useState("");
@@ -41,13 +53,11 @@ const Home = () => {
             socket.emit("subscribe", channel);
 
             socket.on("message", (msg) => {
-                if (msg.includes("hls:")) {
-                    const obj = JSON.parse(msg);
-                    const url = obj.log.replace(/^hls:/, '');
-                    setHlsUrl(url);
-                    console.log(url);
+                const line = parseLog(msg);
+                if (line.startsWith("hls:")) {
+                    setHlsUrl(line.replace(/^hls:/, ''));
                 }
-                setLogs((prev) => [...prev, msg]);
+                setLogs((prev) => [...prev, line]);
             });
 
             return () => {
@@ -58,7 +68,7 @@ const Home = () => {
 
     const handleSubmit = (e) => {
         e.preventDefault();
-        fetch("http://localhost:9000/transcode", {
+        fetch(`${API_URL}/transcode`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ s3Url }),
@@ -67,6 +77,7 @@ const Home = () => {
             .then((data) => {
                 setProjectId(data.projectId);
                 setLogs([]);
+                setHlsUrl("");
             });
     };
 

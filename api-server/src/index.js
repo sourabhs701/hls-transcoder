@@ -9,15 +9,20 @@ import { fileURLToPath } from "url";
 import cors from "cors";
 import sqlite3 from "sqlite3";
 
-const db = new sqlite3.Database("db.sqlite");
-
 dotenv.config();
+
+const REDIS_URL = process.env.REDIS_URL || "redis://localhost:6379";
+const AWS_REGION = process.env.AWS_REGION || "ap-south-1";
+const S3_BUCKET = process.env.S3_BUCKET || "hsl-transcoder";
+const TRANSCODER_IMAGE = process.env.TRANSCODER_IMAGE || "transcoder";
+
+const db = new sqlite3.Database("db.sqlite");
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-const subscriber = new Redis("redis://localhost:6379");
+const subscriber = new Redis(REDIS_URL);
 
 app.use(cors({ origin: "*" }));
 
@@ -67,7 +72,7 @@ app.post("/transcode", (req, res) => {
     return res.status(400).json({ error: "s3Url is required" });
   }
   const projectId = generateSlug();
-  const hls_url = `https://hsl-transcoder.s3.ap-south-1.amazonaws.com/__outputs/${projectId}/index.m3u8`;
+  const hls_url = `https://${S3_BUCKET}.s3.${AWS_REGION}.amazonaws.com/__outputs/${projectId}/index.m3u8`;
 
   db.run("INSERT INTO projects (id, hls_url, s3_url) VALUES (?, ?, ?)", [
     projectId,
@@ -83,9 +88,21 @@ app.get("*catchall", (req, res) => {
 });
 
 function spinup_docker(s3Url, projectId) {
-  exec(
-    `docker run -d --network=host -e S3__URL=${s3Url} -e PROJECT_ID=${projectId} -e accessKeyId=${process.env.accessKeyId} -e secretAccessKey=${process.env.secretAccessKey} transcoder`
-  );
+  const env = [
+    `S3__URL=${s3Url}`,
+    `PROJECT_ID=${projectId}`,
+    `REDIS_URL=${REDIS_URL}`,
+    `AWS_REGION=${AWS_REGION}`,
+    `S3_BUCKET=${S3_BUCKET}`,
+    `AWS_ACCESS_KEY_ID=${process.env.AWS_ACCESS_KEY_ID || ""}`,
+    `AWS_SECRET_ACCESS_KEY=${process.env.AWS_SECRET_ACCESS_KEY || ""}`,
+  ]
+    .map((kv) => `-e ${kv}`)
+    .join(" ");
+  const network = process.env.TRANSCODER_NETWORK
+    ? `--network=${process.env.TRANSCODER_NETWORK}`
+    : "--network=host";
+  exec(`docker run -d ${network} ${env} ${TRANSCODER_IMAGE}`);
   io.emit("message", `transcode ${s3Url} ${projectId}`);
 }
 
